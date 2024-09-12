@@ -41,7 +41,10 @@ ui <- fluidPage(
                    
                    # These UI elements will dynamically display when test 1 (Chi-Squared Test for Independence) is selected
                    uiOutput("var_select_1"),
-                   uiOutput("var_select_2")
+                   uiOutput("var_select_2"),
+                   
+                   # Slider for selecting significance level (alpha)
+                   sliderInput("alpha", "Significance Level (α)", min = 0.01, max = 0.1, value = 0.05, step = 0.01)
                  ),
                  
                  # Main panel to display results and plot
@@ -54,8 +57,28 @@ ui <- fluidPage(
                      h3("Assumptions:"),
                      p("We assume that all observations are independent. To confirm this assumption, we will check whether all expected cell counts are greater than or equal to 5. This will be done by creating a contingency table for the expected cell counts of the two selected variables."),
                      DT::dataTableOutput("expected_table"),
-                     verbatimTextOutput("result"),
-                     plotOutput("plot")
+                     br(),
+                     uiOutput("warning_message"),
+                     h3("Test statistic:"),
+                     uiOutput("t_result"),
+                     br(),
+                     conditionalPanel(
+                       condition = "output.simulation_flag == true",
+                       plotOutput("plot_pvalues")  # Show simulated p-values histogram
+                     ),
+                     
+                     conditionalPanel(
+                       condition = "output.simulation_flag == false",
+                       plotOutput("plot_pvalue_graph")  # Show normal p-value graph
+                     ),
+                     h3("P-value:"),
+                     uiOutput("p_result"),
+                     h3("Conclusion:"),
+                     uiOutput("conclusion"),
+                     br(),
+                     br(),
+                     br()
+                  
                    ),
                  )
                )
