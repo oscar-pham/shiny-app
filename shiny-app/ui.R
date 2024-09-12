@@ -9,6 +9,7 @@
 
 library(shiny)
 library(ggplot2)
+library(DT)
 
 # Define UI for application that draws a histogram
 ui <- fluidPage(
@@ -45,9 +46,17 @@ ui <- fluidPage(
                  
                  # Main panel to display results and plot
                  mainPanel(
-                   h4("Test Results"),
-                   verbatimTextOutput("result"),
-                   plotOutput("plot")
+                   conditionalPanel(
+                     condition = "input.select == 1",
+                     h1("Chi-Squared Test for Independence Hypothesis Testing"),
+                     h3("Hypothesis:"),
+                     p(uiOutput("dynamic_hypothesis")),
+                     h3("Assumptions:"),
+                     p("We assume that all observations are independent. To confirm this assumption, we will check whether all expected cell counts are greater than or equal to 5. This will be done by creating a contingency table for the expected cell counts of the two selected variables."),
+                     DT::dataTableOutput("expected_table"),
+                     verbatimTextOutput("result"),
+                     plotOutput("plot")
+                   ),
                  )
                )
       ),
