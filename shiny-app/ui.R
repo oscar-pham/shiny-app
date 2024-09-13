@@ -1,12 +1,3 @@
-#
-# This is the user-interface definition of a Shiny web application. You can
-# run the application by clicking 'Run App' above.
-#
-# Find out more about building applications with Shiny here:
-#
-#    https://shiny.posit.co/
-#
-
 library(shiny)
 library(ggplot2)
 library(DT)
@@ -20,38 +11,55 @@ ui <- fluidPage(
   # Tab layout
   tabsetPanel(
     
-    # First tab for data input
-    tabsetPanel(
-      
-      # First tab for hypothesis testing
-      tabPanel("Hypothesis Testing",
-               sidebarLayout(
-                 sidebarPanel(
-                   selectInput(
-                     "select",
-                     label = "Choose a test to perform",
-                     choices = list(
-                       "Chi-Squared Test for Independence" = 1,
-                       "Chi-Squared Goodness of Fit Test" = 2,
-                       "One-sample t-test" = 3,
-                       "Two-sample t-test" = 4
-                     ),
-                     selected = 1
+    # First tab for hypothesis testing
+    tabPanel("Hypothesis Testing",
+             sidebarLayout(
+               sidebarPanel(
+                 selectInput(
+                   "select",
+                   label = "Choose a test to perform",
+                   choices = list(
+                     "Chi-Squared Test for Independence" = 1,
+                     "Chi-Squared Goodness of Fit Test" = 2,
+                     "One-sample t-test" = 3,
+                     "Two-sample t-test" = 4
                    ),
-                   
-                   # These UI elements will dynamically display when test 1 (Chi-Squared Test for Independence) is selected
-                   uiOutput("var_select_1"),
-                   uiOutput("var_select_2"),
-                   
-                   # Slider for selecting significance level (alpha)
-                   sliderInput("alpha", "Significance Level (α)", min = 0.01, max = 0.1, value = 0.05, step = 0.01)
+                   selected = 1
                  ),
                  
-                 # Main panel to display results and plot
-                 mainPanel(
+                 # These UI elements will dynamically display when test 1 (Chi-Squared Test for Independence) is selected
+                 conditionalPanel(
+                   condition = "input.select == 1",
+                   uiOutput("var_select_1"),
+                   uiOutput("var_select_2")
+                 ),
+                 
+                 conditionalPanel(
+                   condition = "input.select == 2",
+                   selectInput("var_gof", "Choose the categorical variable", choices = NULL),
+                   selectInput("distribution", "Choose distribution for expected values",
+                               choices = list("Normal" = "normal", "Poisson" = "poisson", "Custom" = "custom"), selected = "normal"),
                    conditionalPanel(
-                     condition = "input.select == 1",
-                     h1("Chi-Squared Test for Independence Hypothesis Testing"),
+                     condition = "input.distribution == 'custom'",
+                     textInput("expected_values", "Enter expected proportions (comma-separated)", "0.25, 0.25, 0.25, 0.25")
+                   )
+                 ),
+                 # Slider for selecting significance level (alpha)
+                 sliderInput("alpha", "Significance Level (α)", min = 0.01, max = 0.1, value = 0.05, step = 0.01)
+               ),
+               
+               # Main panel to display results and plot
+               mainPanel(
+                 conditionalPanel(
+                   condition = "input.select == 1",
+                   h1("Chi-Squared Test for Independence Hypothesis Testing"),
+                   conditionalPanel(
+                     condition = "input.var1 == input.var2",
+                     p("Warning: Both selected variables are the same. Please select different variables.", style = "color: red; font-weight: bold;")
+                   ),
+                   
+                   conditionalPanel(
+                     condition = "input.var1 != input.var2",
                      h3("Hypothesis:"),
                      p(uiOutput("dynamic_hypothesis")),
                      h3("Assumptions:"),
@@ -78,11 +86,30 @@ ui <- fluidPage(
                      br(),
                      br(),
                      br()
-                  
-                   ),
+                   )
+                 ),
+                 
+                 conditionalPanel(
+                   condition = "input.select == 2",
+                   h1("Chi-Squared Goodness of Fit Test"),
+                   h3("Hypothesis:"),
+                   p(uiOutput("gof_hypothesis")),
+                   h3("Assumptions:"),
+                   p("We assume that all observations are independent. To confirm this assumption, we will check whether all expected cell counts are greater than or equal to 5. This will be done by creating a contingency table for the expected cell counts of the selected variable."),
+                   h4("Expected vs. Observed:"),
+                   DT::dataTableOutput("gof_table"),
+                   uiOutput("warning_message"),
+                   h3("Test statistic:"),
+                   uiOutput("gof_t_result"),
+                   plotOutput("chi_squared_plot"),
+                   h3("P-value:"),
+                   uiOutput("gof_p_result"),
+                   h3("Conclusion:"),
+                   uiOutput("gof_conclusion")
                  )
                )
-      ),
+             )
+    ),
     
     # Second tab for results
     tabPanel("Results",
@@ -106,5 +133,3 @@ ui <- fluidPage(
     )
   )
 )
-)
-

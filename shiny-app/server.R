@@ -17,7 +17,7 @@ simulate_test_statistics <- function(var1, var2, n = 1000) {
     
     # Ensure that the table has no zero rows or columns before applying chisq.test
     if (all(rowSums(contingency_table) > 0) && all(colSums(contingency_table) > 0)) {
-      chisq_test <- chisq.test(contingency_table, simulate.p.value = TRUE)
+      chisq_test <- chisq.test(contingency_table)
       return(chisq_test$statistic)  # Return the test statistic instead of the p-value
     } else {
       return(NA)  # Return NA for invalid tables
@@ -31,15 +31,21 @@ simulate_test_statistics <- function(var1, var2, n = 1000) {
 
 conclusion_function <- function(p_value, alpha) {
   if (p_value < alpha) {
-    return(paste("Since the p-value (", formatC(p_value, format = "e", digits = 5), ") is less than the significance level (α = ", alpha, "), we reject the null hypothesis."))
+    return(paste("Since the p-value (", formatC(p_value, digits = 5), ") is less than the significance level (α = ", alpha, "), we reject the null hypothesis."))
   } else {
-    return(paste("Since the p-value (", formatC(p_value, format = "e", digits = 5), ") is greater than or equal to the significance level (α = ", alpha, "), we retain the null hypothesis."))
+    return(paste("Since the p-value (", formatC(p_value, digits = 5), ") is greater than or equal to the significance level (α = ", alpha, "), we retain the null hypothesis."))
   }
 }
 
 #----------------------------------------------------------------------------
 
 server <- function(input, output, session) {
+  
+  observe({
+    updateSelectInput(session, "var_gof", 
+                      choices = names(df)[sapply(df, is.factor)], 
+                      selected = names(df)[sapply(df, is.factor)][1])
+  })
   
   # UI elements for selecting variables
   output$var_select_1 <- renderUI({
@@ -83,6 +89,68 @@ server <- function(input, output, session) {
     }
   })
   
+  # Reactive expression to calculate expected values based on selected distribution
+  expected_values_calculation <- reactive({
+    req(input$var_gof)
+    
+    observed <- table(df[[input$var_gof]])
+    categories <- seq_along(observed)  # Handle non-numeric categories with indices
+    
+    if (input$distribution == "normal") {
+      mean_val <- mean(as.numeric(observed))
+      sd_val <- sd(as.numeric(observed))
+      expected <- dnorm(categories, mean = mean_val, sd = sd_val)
+    } else if (input$distribution == "poisson") {
+      lambda <- mean(as.numeric(observed))
+      expected <- dpois(categories, lambda = lambda)
+    } else if (input$distribution == "custom") {
+      expected_proportions <- as.numeric(unlist(strsplit(input$expected_values, ",")))
+      if (length(expected_proportions) != length(observed)) {
+        showNotification("Expected proportions must match the number of categories.", type = "error")
+        return(NULL)
+      }
+      expected <- expected_proportions
+    }
+    
+    expected <- expected / sum(expected) * sum(observed)  # Rescale to match observed counts
+    return(list(observed = observed, expected = expected))
+  })
+  
+  gof_results <- reactive({
+    req(input$var_gof, input$distribution)
+    
+    # Step 1: Calculate expected and observed values
+    results <- expected_values_calculation()
+    if (is.null(results)) return(NULL)
+    
+    observed <- results$observed
+    expected <- results$expected
+    
+    # Step 2: Check if expected values contain missing or zero values
+    if (any(is.na(expected)) || any(expected == 0)) {
+      showNotification("Expected values contain missing or zero values. Test cannot be performed.", type = "error")
+      return(NULL)
+    }
+    
+    # Step 3: Check if any expected values are less than 5
+    use_simulation <- any(expected < 5)
+    
+    # Step 4: Perform the Chi-Square test with or without simulation
+    chisq_test <- tryCatch({
+      if (use_simulation) {
+        chisq.test(observed, p = expected / sum(expected), rescale.p = TRUE, simulate.p.value = TRUE, B = 2000)
+      } else {
+        chisq.test(observed, p = expected / sum(expected), rescale.p = TRUE)
+      }
+    }, error = function(e) {
+      showNotification(paste("Error performing Chi-Square test:", e$message), type = "error")
+      return(NULL)
+    })
+    
+    # Step 5: Return the test results, include whether simulation was used
+    return(list(test = chisq_test, observed = observed, expected = expected, simulated = use_simulation))
+  })
+  
   # Display test results and warnings
   output$t_result <- renderUI({
     results <- test_results()
@@ -94,7 +162,7 @@ server <- function(input, output, session) {
   output$p_result <- renderUI({
     results <- test_results()
     if (!is.null(results)) {
-      HTML(paste0("<strong>P-value:</strong> ", formatC(results$test$p.value, format = "e", digits = 5)))
+      HTML(paste0("<strong>P-value:</strong> ", formatC(results$test$p.value, digits = 5)))
     }
   })
   
@@ -129,19 +197,43 @@ server <- function(input, output, session) {
   # Display Chi-Square p-value graph (for non-simulated p-values)
   output$plot_pvalue_graph <- renderPlot({
     results <- test_results()
+    
     if (!is.null(results) && !results$simulated) {
-      # Plot normal Chi-Square p-value distribution
+      # Extract p-value and test statistic
       p_value <- results$test$p.value
+      test_stat <- results$test$statistic
+      df <- results$test$parameter  # Degrees of freedom
       
-      ggplot(data.frame(x = c(0, 1)), aes(x = x)) +
-        stat_function(fun = function(x) dchisq(x, df = results$test$parameter)) +
-        geom_vline(aes(xintercept = p_value), color = "red", linetype = "dashed") +
-        labs(title = "Chi-Square P-value Distribution", x = "P-value", y = "Density")
+      # Define a range of x values (Chi-Square statistic values)
+      x_vals <- seq(0, max(test_stat * 1.5, 10), length.out = 1000)  # Adjust the range based on the test_stat
+      
+      # Create a data frame for shading the tail
+      tail_data <- data.frame(x = seq(test_stat, max(x_vals), length.out = 500))
+      
+      # Plot the Chi-Square distribution and the shaded tail
+      ggplot(data.frame(x = x_vals), aes(x = x)) +
+        stat_function(fun = dchisq, args = list(df = df), color = "blue", size = 1) +  # Plot Chi-Square distribution
+        geom_vline(aes(xintercept = test_stat), color = "red", linetype = "dashed", size = 1.2) +  # Vertical line for test statistic
+        geom_area(data = tail_data, aes(x = x, y = dchisq(x, df = df)), fill = "red", alpha = 0.4) +  # Shading the tail
+        labs(title = "Chi-Square Distribution with Test Statistic and P-Value Shaded", 
+             x = "Chi-Square Value", y = "Density") +
+        theme_minimal() +
+        theme(
+          plot.title = element_text(size = 20, hjust = 0.5, face = "bold"),  # Title size and center alignment
+          axis.title.x = element_text(size = 14),  # Adjust x-axis title size
+          axis.title.y = element_text(size = 14)   # Adjust y-axis title size
+        )
     }
   })
   
   output$simulation_flag <- reactive({
+    if (input$select == 1){
     results <- test_results()
+    }
+    else if (input$select == 2){
+      results <- gof_results()
+      print(results)
+    }
     if (!is.null(results)) {
       return(results$simulated)
     }
@@ -152,22 +244,19 @@ server <- function(input, output, session) {
   
   # Display warning if simulation was used
   output$warning_message <- renderUI({
-    results <- test_results()
+    if (input$select == 1) {
+      results <- test_results()  # Chi-Squared Test for Independence
+    } else if (input$select == 2) {
+      results <- gof_results()  # Chi-Squared Goodness of Fit Test
+    }
+    
     if (!is.null(results) && results$simulated) {
       p("Warning: Simulated p-values used due to small expected counts. Assumptions have not been met.", style = "color: red; font-weight: bold;")
     } else {
       NULL
     }
   })
-  
-  # Mosaic plot for Chi-Square Test for Independence
-  output$plot <- renderPlot({
-    results <- test_results()
-    if (!is.null(results) && !is.null(results$observed_table)) {
-      mosaicplot(results$observed_table, main = paste("Mosaic Plot of", input$var1, "and", input$var2), color = TRUE)
-    }
-  })
-  
+
   # Render expected contingency table
   output$expected_table <- DT::renderDataTable({
     results <- test_results()
@@ -197,6 +286,106 @@ output$conclusion <- renderUI({
     HTML(conclusion)
   }
 })
+
+# Dynamic hypothesis for Goodness of Fit Test
+output$gof_hypothesis <- renderUI({
+  if (!is.null(input$var_gof)) {
+    tagList(
+      strong("Null Hypothesis "), "(H", tags$sub("0"), "): ", code(input$var_gof), " follows the specified distribution.",
+      br(), strong("Alternative Hypothesis "), "(H", tags$sub("1"), "): ", code(input$var_gof), " does not follow the specified distribution."
+    )
+  } else {
+    "Please select a variable and enter expected proportions."
+  }
+})
+
+# Render observed and expected counts for Goodness of Fit Test
+output$gof_table <- DT::renderDataTable({
+  results <- gof_results()
+  if (!is.null(results)) {
+    df_gof <- data.frame(
+      Category = names(results$observed),
+      Observed = as.numeric(results$observed),
+      Expected = as.numeric(results$expected)
+    )
+    datatable(df_gof, options = list(dom = 't', paging = FALSE, searching = FALSE), rownames = FALSE)
+  }
+})
+
+
+# Test statistic for Goodness of Fit Test
+output$gof_t_result <- renderUI({
+  results <- gof_results()
+  if (!is.null(results)) {
+    HTML(paste0("<strong>Test Statistic:</strong> ", round(results$test$statistic, 5)))
+  } else {
+    HTML("Test statistic could not be calculated due to missing or invalid data.")
+  }
+})
+
+# P-value for Goodness of Fit Test
+output$gof_p_result <- renderUI({
+  results <- gof_results()
+  if (!is.null(results)) {
+    HTML(paste0("<strong>P-value:</strong> ", formatC(results$test$p.value, digits = 5)))
+  } else {
+    HTML("P-value could not be calculated due to missing or invalid data.")
+  }
+})
+
+
+# Conclusion for Goodness of Fit Test
+output$gof_conclusion <- renderUI({
+  results <- gof_results()
+  if (!is.null(results)) {
+    p_value <- results$test$p.value
+    alpha <- input$alpha
+    conclusion <- ifelse(p_value < alpha,
+                         paste("Since the p-value (", formatC(p_value, digits = 5), ") is less than the significance level (α = ", alpha, "), we reject the null hypothesis."),
+                         paste("Since the p-value (", formatC(p_value, digits = 5), ") is greater than or equal to the significance level (α = ", alpha, "), we retain the null hypothesis.")
+    )
+    HTML(conclusion)
+  }
+})
+
+# Chi-Squared PDF Plot for Goodness of Fit Test with centered peak
+output$chi_squared_plot <- renderPlot({
+  # Use observed data and calculate df for the Chi-Squared distribution
+  results <- gof_results()  # Assuming gof_results() provides observed values
+  
+  if (is.null(results)) {
+    return(NULL)  # Return nothing if no results
+  }
+  
+  observed <- results$observed  # Retrieve observed data
+  df <- length(observed) - 1    # Degrees of freedom for Chi-Squared
+  test_stat <- results$test$statistic  # The test statistic from the Chi-Squared test
+  
+  # Create a sequence for x-axis values, centering around df-2 (Chi-Squared distribution peak)
+  x_max <- max(test_stat * 1.5, df * 2)  # Adjust the max x based on df and test statistic
+  x_vals <- seq(0, x_max, length.out = 1000)  # Adjust the range based on df
+  
+  # Create a data frame for shading the tail
+  tail_data <- data.frame(x = seq(test_stat, x_max, length.out = 500))
+  
+  # Plot the Chi-Squared distribution and the shaded tail
+  ggplot(data.frame(x = x_vals), aes(x = x)) +
+    stat_function(fun = dchisq, args = list(df = df), color = "blue", size = 1) +  # Plot Chi-Squared distribution
+    geom_vline(aes(xintercept = test_stat), color = "red", linetype = "dashed", size = 1.2) +  # Vertical line for test statistic
+    geom_area(data = tail_data, aes(x = x, y = dchisq(x, df = df)), fill = "red", alpha = 0.4) +  # Shading the tail
+    labs(
+      title = paste("Chi-Squared PDF (df =", df, ") with Test Statistic and P-Value Tail"),
+      x = "Chi-Squared value",
+      y = "Density"
+    ) +
+    theme_minimal() +
+    theme(
+      plot.title = element_text(size = 20, hjust = 0.5, face = "bold"),  # Title size and center alignment
+      axis.title.x = element_text(size = 14),  # Adjust x-axis title size
+      axis.title.y = element_text(size = 14)   # Adjust y-axis title size
+    )
+})
+
 
 }
 
