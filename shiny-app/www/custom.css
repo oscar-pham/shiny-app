@@ -1,6 +1,6 @@
 /* Adjust the zoom level for the entire app */
 body {
-  zoom: 1.2; /* Increase zoom to 120% */
+  zoom: 1; 
 }
 
 /* Optionally, increase the base font size */
@@ -17,3 +17,6 @@ body, html {
 .container-fluid {
   padding: 20px;
 }
+
+
+
