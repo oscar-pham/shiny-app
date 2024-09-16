@@ -43,7 +43,7 @@ simulate_test_statistics <- function(var1, var2, n = 1000) {
     
     # Ensure that the table has no zero rows or columns before applying chisq.test
     if (all(rowSums(contingency_table) > 0) && all(colSums(contingency_table) > 0)) {
-      chisq_test <- chisq.test(contingency_table)
+      chisq_test <- suppressWarnings(chisq.test(contingency_table))
       return(chisq_test$statistic)  # Return the test statistic instead of the p-value
     } else {
       return(NA)  # Return NA for invalid tables
@@ -101,8 +101,8 @@ server <- function(input, output, session) {
       # Ensure valid table (no zero rows or columns)
       if (all(rowSums(contingency_table) > 0) && all(colSums(contingency_table) > 0)) {
         # Perform Chi-Square test, with simulation if expected counts < 5
-        simulated <- any(chisq.test(contingency_table)$expected < 5)
-        chisq_test <- chisq.test(contingency_table, simulate.p.value = simulated)
+        simulated <- any(suppressWarnings(chisq.test(contingency_table)$expected < 5))
+        chisq_test <- suppressWarnings(chisq.test(contingency_table, simulate.p.value = simulated))
         
         return(list(
           test = chisq_test,
@@ -277,25 +277,54 @@ gof_results <- reactive({
   
   # Display warning if simulation was used
   output$warning_message <- renderUI({
-    results <- NULL
     if (input$select == 1) {
       results <- test_results()  # Chi-Squared Test for Independence
+      print(results)
     } else if (input$select == 2) {
       results <- gof_results()  # Chi-Squared Goodness of Fit Test
     }
-    
     if (!is.null(results) && results$simulated) {
       p("Warning: Simulated p-values used due to small expected counts. Assumptions have not been met.", style = "color: red; font-weight: bold;")
     } else {
       NULL
     }
   })
-
-  # Render expected contingency table
+  
+  # Render expected contingency table with 'table-danger' for rows with values < 5
   output$expected_table <- DT::renderDataTable({
     results <- test_results()
+    
     if (!is.null(results)) {
-      datatable(as.data.frame.matrix(results$expected_table), options = list(dom = 't', paging = FALSE, searching = FALSE), rownames = TRUE)
+      expected_table <- as.data.frame.matrix(results$expected_table)
+      
+      # Add rownames to the table
+      expected_table$RowNames <- rownames(expected_table)
+      expected_table <- expected_table[, c(ncol(expected_table), 1:(ncol(expected_table) - 1))]  # Reorder so rownames come first
+      
+      # Prepare the row callback to add 'table-danger' to rows where any cell < 5
+      row_callback <- JS(
+        "function(row, data, index) {",
+        "  var min_value = Math.min.apply(null, data.slice(1));",  # Skip the first column (row names)
+        "  if (min_value < 5) {",
+        "    $(row).addClass('table-danger');",  # Add 'table-danger' class
+        "  }",
+        "}"
+      )
+      
+      # Create the datatable
+      datatable(
+        expected_table, 
+        options = list(
+          dom = 't',          # Show only the table, no pagination, no search bar
+          paging = FALSE,     # Disable pagination
+          searching = FALSE,  # Disable search
+          ordering = TRUE,    # Enable column sorting
+          autoWidth = TRUE,   # Automatically adjust column width
+          rowCallback = row_callback  # Use the row callback to apply 'table-danger' class
+        ),
+        rownames = FALSE,  # Already included in the table
+        class = 'table table-hover table-striped'
+      )
     }
   })
   
@@ -429,7 +458,7 @@ observeEvent(input$categorical_var, {
       bucket_list(
         header = "Drag the levels of the variable to subset the dataset into 2 samples",
         group_name = "bucket_list_group",
-        orientation = "horizontal",
+        orientation = "vertical",
         add_rank_list(text = "List of Levels", labels = categories),
         add_rank_list(text = "Sample 1", labels = NULL, input_id = "rank_list_1"),
         add_rank_list(text = "Sample 2", labels = NULL, input_id = "rank_list_2")

@@ -3,18 +3,21 @@ library(ggplot2)
 library(DT)
 library(sortable)
 library(shinyWidgets)
+library(shinythemes)
+library(bslib)
 
-# Define UI for application that draws a histogram
+
+
+
 ui <- fluidPage(
-  
-  # Application title
-  titlePanel("Chi-Square Hypothesis Testing App"),
-  
-  # Tab layout
-  tabsetPanel(
-    
-    # First tab for hypothesis testing
-    tabPanel("Hypothesis Testing",
+  tags$head(
+    tags$link(rel = "stylesheet", type = "text/css", href = "bootstrap.min.css"),
+    # Custom CSS to adjust zoom and font size
+    tags$link(rel = "stylesheet", type = "text/css", href = "custom.css")
+  ),
+  navbarPage(
+    "DATA2902: Hypothesis-testing Shiny App",
+    tabPanel("Hypothesis testing",
              sidebarLayout(
                sidebarPanel(
                  selectInput(
@@ -25,7 +28,7 @@ ui <- fluidPage(
                      "Chi-Squared Goodness of Fit Test" = 2,
                      "Two-sample t-test" = 3
                    ),
-                   selected = 3
+                   selected = 1
                  ),
                  
                  # These UI elements will dynamically display when test 1 (Chi-Squared Test for Independence) is selected
@@ -97,7 +100,7 @@ ui <- fluidPage(
                      p("We assume that all observations are independent. We will also assume that all expected cell counts are at least 5. This assumption can be checked by creating a contingency table for the expected cell counts of the selected variable."),
                      DT::dataTableOutput("expected_table"),
                      br(),
-                     uiOutput("warning_message"),
+                     uiOutput("warning_message"),  # Display the warning message
                      h3("Test statistic:"),
                      uiOutput("t_result"),
                      br(),
@@ -136,7 +139,10 @@ ui <- fluidPage(
                    h3("P-value:"),
                    uiOutput("gof_p_result"),
                    h3("Conclusion:"),
-                   uiOutput("gof_conclusion")
+                   uiOutput("gof_conclusion"),
+                   br(),
+                   br(),
+                   br()
                  ),
                  conditionalPanel(
                    condition = "input.select == 3",
@@ -152,48 +158,33 @@ ui <- fluidPage(
                    # Render the rest only if exactly one sample is selected per group
                    conditionalPanel(
                      condition = "input.rank_list_1 && input.rank_list_2 && (input.rank_list_1.length == 1 && input.rank_list_2.length == 1)",
-                   h3("Hypothesis:"),
-                   p(uiOutput("dynamic_hypothesis_ttest")),
-                   h3("Assumptions:"),
-                   p("We assume that all observations are independent. We assume the data in each group is approximately normal and the groups have equal variance. To check normality, we will use Q-Q plots for each sample, and to check for equal variance, we will use side-by-side box plots."),
-                   h4("Q-Q plot"),
-                   p("In a Q-Q plot, if the data points closely follow the red dotted line, it indicates that the data is approximately normally distributed. Deviations from this line suggest that the data may not follow a normal distribution, with systematic patterns like curves indicating skewness and outliers appearing as points far from the line. If normality is violated, consider enabling the 'Permutation' option to run a permutation test."),
-                   plotOutput("qq_plot"),
-                   h4("Box plot"),
-                   p(" In a box plot, if the boxes (interquartile ranges) for two groups are of similar length, it suggests that the groups may have equal variances. Significant differences in box height imply unequal variances, and outliers are shown as individual points beyond the whiskers. If unequal variances are detected, consider enabling the 'Welch' option to perform a Welch's t-test."),
-                   plotOutput("box_plot"),
-                   h3("Test statistic:"),
-                   uiOutput("t_t_result"),
-                   h3("P-value:"),
-                   uiOutput("t_p_result"),
-                   h3("Conclusion:"),
-                   uiOutput("t_conclusion")
-                   
-                  )
+                     h3("Hypothesis:"),
+                     p(uiOutput("dynamic_hypothesis_ttest")),
+                     h3("Assumptions:"),
+                     p("We assume that all observations are independent. We assume the data in each group is approximately normal and the groups have equal variance. To check normality, we will use Q-Q plots for each sample, and to check for equal variance, we will use side-by-side box plots."),
+                     h4("Q-Q plot"),
+                     p("In a Q-Q plot, if the data points closely follow the red dotted line, it indicates that the data is approximately normally distributed. Deviations from this line suggest that the data may not follow a normal distribution, with systematic patterns like curves indicating skewness and outliers appearing as points far from the line. If normality is violated, consider enabling the 'Permutation' option to run a permutation test."),
+                     plotOutput("qq_plot"),
+                     h4("Box plot"),
+                     p(" In a box plot, if the boxes (interquartile ranges) for two groups are of similar length, it suggests that the groups may have equal variances. Significant differences in box height imply unequal variances, and outliers are shown as individual points beyond the whiskers. If unequal variances are detected, consider enabling the 'Welch' option to perform a Welch's t-test."),
+                     plotOutput("box_plot"),
+                     h3("Test statistic:"),
+                     uiOutput("t_t_result"),
+                     h3("P-value:"),
+                     uiOutput("t_p_result"),
+                     h3("Conclusion:"),
+                     uiOutput("t_conclusion"),
+                     br(),
+                     br(),
+                     br()
+                   )
                  )
                )
              )
+             
     ),
-    
-    # Second tab for results
-    tabPanel("Results",
-             mainPanel(
-             )
-    ),
-    
-    # Third tab for test overview
-    tabPanel("Overview",
-             h4("About the Chi-Square Test"),
-             p("The Chi-Square test is used to determine if there is a significant difference between the observed and expected frequencies in one or more categories."),
-             p("It compares the observed frequencies from your data with the expected frequencies based on a specific hypothesis."),
-             h4("Formula"),
-             p("The formula for the Chi-Square statistic is:"),
-             tags$ul(
-               tags$li("X² = Σ((Observed - Expected)² / Expected)"),
-               tags$li("Degrees of freedom (df) = number of categories - 1")
-             ),
-             h4("How to Interpret"),
-             p("If the p-value is less than 0.05, we reject the null hypothesis, indicating that there is a statistically significant difference between the observed and expected data.")
-    )
+    tabPanel("Navbar 2", "This panel is intentionally left blank"),
+    tabPanel("Navbar 3", "This panel is intentionally left blank")
   )
 )
+

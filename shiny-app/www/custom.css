@@ -1,0 +1,19 @@
+/* Adjust the zoom level for the entire app */
+body {
+  zoom: 1.2; /* Increase zoom to 120% */
+}
+
+/* Optionally, increase the base font size */
+body, html {
+  font-size: 16px; /* Adjust the base font size */
+}
+
+/* Adjust the font size of navbar items */
+.navbar {
+  font-size: 18px;
+}
+
+/* Adjust padding and margins for a better look */
+.container-fluid {
+  padding: 20px;
+}
