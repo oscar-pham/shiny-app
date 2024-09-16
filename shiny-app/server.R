@@ -1,6 +1,8 @@
 library(shiny)
 library(ggplot2)
 library(DT)
+library(sortable)
+
 #----------------------------------------------------------------------------
 
 df <- read.csv("df_cleaned.csv", header = TRUE, sep = ",")
@@ -8,6 +10,30 @@ df <- read.csv("df_cleaned.csv", header = TRUE, sep = ",")
 df[] <- lapply(df, function(x) if(is.character(x)) as.factor(x) else x)
 
 #----------------------------------------------------------------------------
+
+# Helper function for permutation test
+perm_test <- function(sample1, sample2, n_perm = 1000, welch = FALSE) {
+  combined <- c(sample1, sample2)
+  n1 <- length(sample1)
+  n2 <- length(sample2)
+  
+  # Observed t-statistic
+  observed_t <- t.test(sample1, sample2, var.equal = !welch)$statistic
+  
+  # Permutations
+  perm_t_stats <- replicate(n_perm, {
+    permuted <- sample(combined)
+    perm_sample1 <- permuted[1:n1]
+    perm_sample2 <- permuted[(n1 + 1):(n1 + n2)]
+    
+    t.test(perm_sample1, perm_sample2, var.equal = !welch)$statistic
+  })
+  
+  # Calculate p-value
+  p_value <- mean(abs(perm_t_stats) >= abs(observed_t))
+  
+  return(list(statistic = observed_t, p_value = p_value))
+}
 
 simulate_test_statistics <- function(var1, var2, n = 1000) {
   test_statistics <- replicate(n, {
@@ -33,7 +59,7 @@ conclusion_function <- function(p_value, alpha) {
   if (p_value < alpha) {
     return(paste("Since the p-value (", formatC(p_value, digits = 5), ") is less than the significance level (α = ", alpha, "), we reject the null hypothesis."))
   } else {
-    return(paste("Since the p-value (", formatC(p_value, digits = 5), ") is greater than or equal to the significance level (α = ", alpha, "), we retain the null hypothesis."))
+    return(paste("Since the p-value (", formatC(p_value, digits = 5), ") is greater than or equal to the significance level (α = ", alpha, "), we do not reject the null hypothesis."))
   }
 }
 
@@ -42,6 +68,11 @@ conclusion_function <- function(p_value, alpha) {
 server <- function(input, output, session) {
   
   observe({
+    numeric_vars <- names(df)[sapply(df, is.numeric)]
+    factor_vars <- names(df)[sapply(df, is.factor)]
+    
+    updateSelectInput(session, "quantitative_var", choices = numeric_vars)
+    updateSelectInput(session, "categorical_var", choices = factor_vars)
     updateSelectInput(session, "var_gof", 
                       choices = names(df)[sapply(df, is.factor)], 
                       selected = names(df)[sapply(df, is.factor)][1])
@@ -116,36 +147,36 @@ server <- function(input, output, session) {
     return(list(observed = observed, expected = expected))
   })
   
-  gof_results <- reactive({
-    req(input$var_gof, input$distribution)
-    
-    # Step 1: Calculate expected and observed values
-    results <- expected_values_calculation()
-    if (is.null(results)) return(NULL)
-    
-    observed <- results$observed
-    expected <- results$expected
-    
-    # Step 2: Check if expected values contain missing or zero values
-    if (any(is.na(expected)) || any(expected == 0)) {
-      showNotification("Expected values contain missing or zero values. Test cannot be performed.", type = "error")
-      return(NULL)
+gof_results <- reactive({
+  req(input$var_gof, input$distribution)
+  
+  # Step 1: Calculate expected and observed values
+  results <- expected_values_calculation()
+  if (is.null(results)) return(NULL)
+  
+  observed <- results$observed
+  expected <- results$expected
+  
+  # Step 2: Check if expected values contain missing or zero values
+  if (any(is.na(expected)) || any(expected == 0)) {
+    showNotification("Expected values contain missing or zero values. Test cannot be performed.", type = "error")
+    return(NULL)
+  }
+  
+  # Step 3: Check if any expected values are less than 5
+  use_simulation <- any(expected < 5)
+  
+  # Step 4: Perform the Chi-Square test with or without simulation
+  chisq_test <- tryCatch({
+    if (use_simulation) {
+      chisq.test(observed, p = expected / sum(expected), rescale.p = TRUE, simulate.p.value = TRUE, B = 2000)
+    } else {
+      chisq.test(observed, p = expected / sum(expected), rescale.p = TRUE)
     }
-    
-    # Step 3: Check if any expected values are less than 5
-    use_simulation <- any(expected < 5)
-    
-    # Step 4: Perform the Chi-Square test with or without simulation
-    chisq_test <- tryCatch({
-      if (use_simulation) {
-        chisq.test(observed, p = expected / sum(expected), rescale.p = TRUE, simulate.p.value = TRUE, B = 2000)
-      } else {
-        chisq.test(observed, p = expected / sum(expected), rescale.p = TRUE)
-      }
-    }, error = function(e) {
-      showNotification(paste("Error performing Chi-Square test:", e$message), type = "error")
-      return(NULL)
-    })
+  }, error = function(e) {
+    showNotification(paste("Error performing Chi-Square test:", e$message), type = "error")
+    return(NULL)
+  })
     
     # Step 5: Return the test results, include whether simulation was used
     return(list(test = chisq_test, observed = observed, expected = expected, simulated = use_simulation))
@@ -227,6 +258,8 @@ server <- function(input, output, session) {
   })
   
   output$simulation_flag <- reactive({
+    req(input$select)
+    results <- NULL
     if (input$select == 1){
     results <- test_results()
     }
@@ -244,6 +277,7 @@ server <- function(input, output, session) {
   
   # Display warning if simulation was used
   output$warning_message <- renderUI({
+    results <- NULL
     if (input$select == 1) {
       results <- test_results()  # Chi-Squared Test for Independence
     } else if (input$select == 2) {
@@ -340,10 +374,7 @@ output$gof_conclusion <- renderUI({
   if (!is.null(results)) {
     p_value <- results$test$p.value
     alpha <- input$alpha
-    conclusion <- ifelse(p_value < alpha,
-                         paste("Since the p-value (", formatC(p_value, digits = 5), ") is less than the significance level (α = ", alpha, "), we reject the null hypothesis."),
-                         paste("Since the p-value (", formatC(p_value, digits = 5), ") is greater than or equal to the significance level (α = ", alpha, "), we retain the null hypothesis.")
-    )
+    conclusion <- conclusion_function(p_value, alpha)
     HTML(conclusion)
   }
 })
@@ -386,6 +417,179 @@ output$chi_squared_plot <- renderPlot({
     )
 })
 
+# Bucket list UI rendering
+observeEvent(input$categorical_var, {
+  req(input$categorical_var)
+  
+  categories <- na.omit(unique(df[[input$categorical_var]]))
+  
+  output$bucket_list_ui <- renderUI({
+    column(
+      width = 12,
+      bucket_list(
+        header = "Drag the levels of the variable to subset the dataset into 2 samples",
+        group_name = "bucket_list_group",
+        orientation = "horizontal",
+        add_rank_list(text = "List of Levels", labels = categories),
+        add_rank_list(text = "Sample 1", labels = NULL, input_id = "rank_list_1"),
+        add_rank_list(text = "Sample 2", labels = NULL, input_id = "rank_list_2")
+      )
+    )
+  })
+})
+
+
+# Reactive data extraction based on selected categories
+selected_data <- reactive({
+  req(input$quantitative_var, input$categorical_var)
+  
+  sample1 <- input$rank_list_1
+  sample2 <- input$rank_list_2
+  
+  if (length(sample1) == 1 && length(sample2) == 1 && sample1 != sample2) {
+    data_sample1 <- df[df[[input$categorical_var]] %in% sample1, ]
+    data_sample2 <- df[df[[input$categorical_var]] %in% sample2, ]
+    data_sample1 <- data_sample1[is.finite(data_sample1[[input$quantitative_var]]), ]
+    data_sample2 <- data_sample2[is.finite(data_sample2[[input$quantitative_var]]), ]
+    
+    list(sample1 = data_sample1[[input$quantitative_var]], sample2 = data_sample2[[input$quantitative_var]])
+  } else {
+    NULL
+  }
+})
+
+# Perform t-tests based on user inputs for Welch's test and/or permutation test
+t_test_result <- reactive({
+  data <- selected_data()
+  
+  if (!is.null(data) && length(data$sample1) > 1 && length(data$sample2) > 1) {
+    test_result <- NULL
+    
+    # Run a normal t-test
+    if (!input$welch && !input$perm) {
+      test_result <- t.test(data$sample1, data$sample2, var.equal = TRUE)
+    }
+    
+    # Both tests (Welch and Permutation)
+    else if (input$welch && input$perm) {
+      test_result <- perm_test(data$sample1, data$sample2, n_perm = 1000, welch = TRUE)
+      return(list("t-stat" = as.numeric(test_result$statistic), "p-value" = as.numeric(test_result$p_value)))
+    }
+    
+    # Welch's t-test
+    else if (input$welch) {
+      test_result <- t.test(data$sample1, data$sample2, var.equal = FALSE)
+    }
+    
+    # Permutation test
+    else if (input$perm) {
+      test_result <- perm_test(data$sample1, data$sample2, n_perm = 1000)
+      return(list("t-stat" = as.numeric(test_result$statistic), "p-value" = as.numeric(test_result$p_value)))
+    }
+    
+    # Return the result from normal or Welch's t-test
+    if (!is.null(test_result)) {
+      return(list("t-stat" = as.numeric(test_result$statistic), "p-value" = as.numeric(test_result$p.value)))
+    }
+    
+  } else {
+    print("Please select valid categories and ensure there is sufficient data for both samples.")
+    return(NULL)
+  }
+})
+
+# Test statistic for t-Test
+output$t_t_result <- renderUI({
+  results <- t_test_result()
+  if (!is.null(results)) {
+    HTML(paste0("<strong>Test Statistic:</strong> ", round(results[["t-stat"]], 5)))
+  } else {
+    HTML("Test statistic could not be calculated due to missing or invalid data.")
+  }
+})
+
+# P-value for t-Test
+output$t_p_result <- renderUI({
+  results <- t_test_result()
+  if (!is.null(results)) {
+    HTML(paste0("<strong>P-value:</strong> ", formatC(results[["p-value"]], digits = 5)))
+  } else {
+    HTML("P-value could not be calculated due to missing or invalid data.")
+  }
+})
+
+
+output$dynamic_hypothesis_ttest <- renderUI({
+    tagList(
+      strong("Null Hypothesis "), "(H", tags$sub("0"), "): Mean of ", code(input$quantitative_var), " is the same across the two samples",
+      br(), strong("Alternative Hypothesis "), "(H", tags$sub("1"), "): Mean of ", code(input$quantitative_var), " is not the same across two samples"
+    )
+})
+
+output$qq_plot <- renderPlot({
+  data <- selected_data()
+  
+  # Get selected categories for Sample 1 and Sample 2
+  sample1 <- input$rank_list_1
+  sample2 <- input$rank_list_2
+  
+  # Ensure that there is enough data in both samples
+  if (!is.null(data) && length(data$sample1) > 1 && length(data$sample2) > 1) {
+    
+    # Set up side by side plotting
+    par(mfrow = c(1, 2))  # Set up 1 row, 2 columns for side by side plotting
+    
+    # Q-Q Plot for Sample 1
+    qqnorm(data$sample1, main = "Q-Q Plot: Sample 1", xlab = "Theoretical Quantiles", ylab = "Sample 1 Quantiles", col = "blue", pch = 16)
+    qqline(data$sample1, col = "red", lwd = 2, lty = 2)
+    
+    # Q-Q Plot for Sample 2
+    qqnorm(data$sample2, main = "Q-Q Plot: Sample 2", xlab = "Theoretical Quantiles", ylab = "Sample 2 Quantiles", col = "blue", pch = 16)
+    qqline(data$sample2, col = "red", lwd = 2, lty = 2)
+    
+  } else {
+    # If there is not enough data, show an error message
+    plot.new()
+    text(0.5, 0.5, "Not enough data in one or both samples for the Q-Q plot.", cex = 1.5)
+  }
+
+})
+
+output$box_plot <- renderPlot({
+  data <- selected_data()
+  
+  # Ensure that there is enough data in both samples
+  if (!is.null(data) && length(data$sample1) > 1 && length(data$sample2) > 1) {
+    # Combine the two samples into one data frame for plotting
+    combined_data <- rbind(
+      data.frame(Sample = "Sample 1", Value = data$sample1),
+      data.frame(Sample = "Sample 2", Value = data$sample2)
+    )
+    
+    # Create side-by-side box plots using ggplot2
+    ggplot(combined_data, aes(x = Sample, y = Value, fill = Sample)) +
+      geom_boxplot() +
+      labs(title = "Box Plots for Sample 1 and Sample 2", x = "Sample", y = input$quantitative_var) +
+      theme_minimal() +
+      theme(axis.title.x = element_text(size = 14), axis.title.y = element_text(size = 14))
+    
+  } else {
+    plot.new()
+    text(0.5, 0.5, "Not enough data in one or both samples for box plots.", cex = 1.5)
+  }
+
+})
+
+# Conclusion for t-Test
+output$t_conclusion <- renderUI({
+  results <- t_test_result()
+  if (!is.null(results)) {
+    p_value <- results[["p-value"]]
+    alpha <- input$alpha
+    conclusion <- conclusion_function(p_value, alpha)
+    HTML(conclusion)
+  }
+})
 
 }
 
