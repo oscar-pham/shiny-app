@@ -12,13 +12,13 @@ df[] <- lapply(df, function(x) if(is.character(x)) as.factor(x) else x)
 #----------------------------------------------------------------------------
 
 # Helper function for permutation test
-perm_test <- function(sample1, sample2, n_perm = 1000, welch = FALSE) {
+perm_test <- function(sample1, sample2, n_perm = 1000, welch = FALSE, alternative = "greater") {
   combined <- c(sample1, sample2)
   n1 <- length(sample1)
   n2 <- length(sample2)
   
   # Observed t-statistic
-  observed_t <- t.test(sample1, sample2, var.equal = !welch)$statistic
+  observed_t <- t.test(sample1, sample2, var.equal = !welch, alternative = alternative)$statistic
   
   # Permutations
   perm_t_stats <- replicate(n_perm, {
@@ -26,7 +26,7 @@ perm_test <- function(sample1, sample2, n_perm = 1000, welch = FALSE) {
     perm_sample1 <- permuted[1:n1]
     perm_sample2 <- permuted[(n1 + 1):(n1 + n2)]
     
-    t.test(perm_sample1, perm_sample2, var.equal = !welch)$statistic
+    t.test(perm_sample1, perm_sample2, var.equal = !welch, alternative = alternative)$statistic
   })
   
   # Calculate p-value
@@ -43,7 +43,7 @@ simulate_test_statistics <- function(var1, var2, n = 1000) {
     
     # Ensure that the table has no zero rows or columns before applying chisq.test
     if (all(rowSums(contingency_table) > 0) && all(colSums(contingency_table) > 0)) {
-      chisq_test <- chisq.test(contingency_table)
+      chisq_test <- suppressWarnings(chisq.test(contingency_table))
       return(chisq_test$statistic)  # Return the test statistic instead of the p-value
     } else {
       return(NA)  # Return NA for invalid tables
@@ -101,8 +101,8 @@ server <- function(input, output, session) {
       # Ensure valid table (no zero rows or columns)
       if (all(rowSums(contingency_table) > 0) && all(colSums(contingency_table) > 0)) {
         # Perform Chi-Square test, with simulation if expected counts < 5
-        simulated <- any(chisq.test(contingency_table)$expected < 5)
-        chisq_test <- chisq.test(contingency_table, simulate.p.value = simulated)
+        simulated <- any(suppressWarnings(chisq.test(contingency_table)$expected < 5))
+        chisq_test <- suppressWarnings(chisq.test(contingency_table, simulate.p.value = simulated))
         
         return(list(
           test = chisq_test,
@@ -275,27 +275,41 @@ gof_results <- reactive({
   
   outputOptions(output, "simulation_flag", suspendWhenHidden = FALSE)
   
-  # Display warning if simulation was used
-  output$warning_message <- renderUI({
-    results <- NULL
-    if (input$select == 1) {
-      results <- test_results()  # Chi-Squared Test for Independence
-    } else if (input$select == 2) {
-      results <- gof_results()  # Chi-Squared Goodness of Fit Test
-    }
-    
-    if (!is.null(results) && results$simulated) {
-      p("Warning: Simulated p-values used due to small expected counts. Assumptions have not been met.", style = "color: red; font-weight: bold;")
-    } else {
-      NULL
-    }
-  })
-
-  # Render expected contingency table
+  # Render expected contingency table with 'table-danger' for rows with values < 5
   output$expected_table <- DT::renderDataTable({
     results <- test_results()
+    
     if (!is.null(results)) {
-      datatable(as.data.frame.matrix(results$expected_table), options = list(dom = 't', paging = FALSE, searching = FALSE), rownames = TRUE)
+      expected_table <- as.data.frame.matrix(results$expected_table)
+      
+      # Add rownames to the table
+      expected_table$RowNames <- rownames(expected_table)
+      expected_table <- expected_table[, c(ncol(expected_table), 1:(ncol(expected_table) - 1))]  # Reorder so rownames come first
+      
+      # Prepare the row callback to add 'table-danger' to rows where any cell < 5
+      row_callback <- JS(
+        "function(row, data, index) {",
+        "  var min_value = Math.min.apply(null, data.slice(1));",  # Skip the first column (row names)
+        "  if (min_value < 5) {",
+        "    $(row).addClass('table-danger');",  # Add 'table-danger' class
+        "  }",
+        "}"
+      )
+      
+      # Create the datatable
+      datatable(
+        expected_table, 
+        options = list(
+          dom = 't',          # Show only the table, no pagination, no search bar
+          paging = FALSE,     # Disable pagination
+          searching = FALSE,  # Disable search
+          ordering = TRUE,    # Enable column sorting
+          autoWidth = TRUE,   # Automatically adjust column width
+          rowCallback = row_callback  # Use the row callback to apply 'table-danger' class
+        ),
+        rownames = FALSE,  # Already included in the table
+        class = 'table table-hover table-striped'
+      )
     }
   })
   
@@ -420,16 +434,16 @@ output$chi_squared_plot <- renderPlot({
 # Bucket list UI rendering
 observeEvent(input$categorical_var, {
   req(input$categorical_var)
-  
+
   categories <- na.omit(unique(df[[input$categorical_var]]))
-  
+
   output$bucket_list_ui <- renderUI({
     column(
       width = 12,
       bucket_list(
-        header = "Drag the levels of the variable to subset the dataset into 2 samples",
+        header = NULL,
         group_name = "bucket_list_group",
-        orientation = "horizontal",
+        orientation = "vertical",
         add_rank_list(text = "List of Levels", labels = categories),
         add_rank_list(text = "Sample 1", labels = NULL, input_id = "rank_list_1"),
         add_rank_list(text = "Sample 2", labels = NULL, input_id = "rank_list_2")
@@ -437,7 +451,6 @@ observeEvent(input$categorical_var, {
     )
   })
 })
-
 
 # Reactive data extraction based on selected categories
 selected_data <- reactive({
@@ -466,24 +479,24 @@ t_test_result <- reactive({
     test_result <- NULL
     
     # Run a normal t-test
-    if (!input$welch && !input$perm) {
-      test_result <- t.test(data$sample1, data$sample2, var.equal = TRUE)
+    if (!isTRUE(input$welch) && !isTRUE(input$perm)) {
+      test_result <- t.test(data$sample1, data$sample2, var.equal = TRUE, alternative = input$alternative)
     }
     
-    # Both tests (Welch and Permutation)
-    else if (input$welch && input$perm) {
-      test_result <- perm_test(data$sample1, data$sample2, n_perm = 1000, welch = TRUE)
+    # Perform both tests (Welch and Permutation)
+    else if (isTRUE(input$welch) && isTRUE(input$perm)) {
+      test_result <- perm_test(data$sample1, data$sample2, n_perm = 1000, welch = TRUE, alternative = input$alternative)
       return(list("t-stat" = as.numeric(test_result$statistic), "p-value" = as.numeric(test_result$p_value)))
     }
     
     # Welch's t-test
-    else if (input$welch) {
-      test_result <- t.test(data$sample1, data$sample2, var.equal = FALSE)
+    else if (isTRUE(input$welch)) {
+      test_result <- t.test(data$sample1, data$sample2, var.equal = FALSE, alternative = input$alternative)
     }
     
     # Permutation test
-    else if (input$perm) {
-      test_result <- perm_test(data$sample1, data$sample2, n_perm = 1000)
+    else if (isTRUE(input$perm)) {
+      test_result <- perm_test(data$sample1, data$sample2, n_perm = 1000, alternative = input$alternative)
       return(list("t-stat" = as.numeric(test_result$statistic), "p-value" = as.numeric(test_result$p_value)))
     }
     
@@ -493,7 +506,7 @@ t_test_result <- reactive({
     }
     
   } else {
-    print("Please select valid categories and ensure there is sufficient data for both samples.")
+    showNotification("Please select valid categories and ensure there is sufficient data for both samples.", type = "error")
     return(NULL)
   }
 })
