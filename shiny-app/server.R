@@ -6,8 +6,20 @@ library(sortable)
 #----------------------------------------------------------------------------
 
 df <- read.csv("df_cleaned.csv", header = TRUE, sep = ",")
-# Automatically convert all character columns to factors
-df[] <- lapply(df, function(x) if(is.character(x)) as.factor(x) else x)
+
+# Convert all character columns to factors and non-character columns to numeric
+df[] <- lapply(df, function(x) {
+  if (is.character(x)) {
+    # Convert "NA" strings to actual NA before converting to factor
+    x[x == "NA"] <- NA
+    as.factor(x)  # Convert character columns to factors
+  } else {
+    as.numeric(x)  # Convert non-character columns to numeric
+  }
+})
+
+# Remove rows with any NA values (including "NA" strings now converted)
+df <- na.omit(df)
 
 #----------------------------------------------------------------------------
 
@@ -66,7 +78,6 @@ conclusion_function <- function(p_value, alpha) {
 #----------------------------------------------------------------------------
 
 server <- function(input, output, session) {
-  
   observe({
     numeric_vars <- names(df)[sapply(df, is.numeric)]
     factor_vars <- names(df)[sapply(df, is.factor)]
@@ -82,6 +93,52 @@ server <- function(input, output, session) {
   output$var_select_1 <- renderUI({
     if (input$select == 1) {
       selectInput("var1", "Choose the first categorical variable", choices = names(df)[sapply(df, is.factor)], selected = names(df)[1])
+    }
+  })
+  
+  # UI elements for selecting variables
+  output$var_select_num3 <- renderUI({
+    selectInput("numerical", "Choose a numerical variable", choices = names(df)[sapply(df, is.numeric)], selected = names(df)[1])
+
+  })
+  
+  # UI elements for selecting variables
+  output$var_select_num4 <- renderUI({
+    selectInput("numerical", "Choose a numerical variable", choices = names(df)[sapply(df, is.numeric)], selected = names(df)[1])
+    
+  })
+  
+  # Render the UI element for categorical and numerical variable selection
+  output$var_select_cat2 <- renderUI({
+    selectInput("categorical", "Choose a categorical variable (grouping):", 
+                choices = names(df)[sapply(df, is.factor)], 
+                selected = names(df)[sapply(df, is.factor)][1])
+  })
+  
+  output$var_select_num5 <- renderUI({
+    selectInput("numerical", "Choose a numerical variable (values):", 
+                choices = names(df)[sapply(df, is.numeric)], 
+                selected = names(df)[sapply(df, is.numeric)][1])
+  })
+  
+  # UI elements for selecting variables
+  output$var_select_num1 <- renderUI({
+    if (input$plotting == 3) {
+      selectInput("numerical1", "Choose the first numerical variable", choices = names(df)[sapply(df, is.numeric)], selected = names(df)[1])
+    }
+  })
+  
+  # UI elements for selecting variables
+  output$var_select_num2 <- renderUI({
+    if (input$plotting == 3) {
+      selectInput("numerical2", "Choose the second numerical variable", choices = names(df)[sapply(df, is.numeric)], selected = names(df)[1])
+    }
+  })
+  
+  # UI elements for selecting variables
+  output$var_select_cat <- renderUI({
+    if (input$plotting == 1) {
+      selectInput("categorical", "Choose a categorical variable", choices = names(df)[sapply(df, is.factor)], selected = names(df)[1])
     }
   })
   
@@ -207,7 +264,7 @@ gof_results <- reactive({
         
         if (length(t_stat) > 0) {  # Ensure there are valid p-values
           ggplot(data.frame(t_stat), aes(x = t_stat)) +
-            geom_histogram(binwidth = 0.75, fill = "blue", color = "black") +
+            geom_histogram(binwidth = 0.75, fill = "grey", color = "black") +
             geom_vline(aes(xintercept = results$test$statistic), color = "red", linetype = "dashed", size = 1.2) +  # Vertical line for test statistic
             labs(title = "Histogram of Simulated P-values", x = "Values", y = "Frequency") +
             theme(
@@ -243,7 +300,7 @@ gof_results <- reactive({
       
       # Plot the Chi-Square distribution and the shaded tail
       ggplot(data.frame(x = x_vals), aes(x = x)) +
-        stat_function(fun = dchisq, args = list(df = df), color = "blue", size = 1) +  # Plot Chi-Square distribution
+        stat_function(fun = dchisq, args = list(df = df), color = "grey", size = 1) +  # Plot Chi-Square distribution
         geom_vline(aes(xintercept = test_stat), color = "red", linetype = "dashed", size = 1.2) +  # Vertical line for test statistic
         geom_area(data = tail_data, aes(x = x, y = dchisq(x, df = df)), fill = "red", alpha = 0.4) +  # Shading the tail
         labs(title = "Chi-Square Distribution with Test Statistic and P-Value Shaded", 
@@ -602,6 +659,112 @@ output$t_conclusion <- renderUI({
     conclusion <- conclusion_function(p_value, alpha)
     HTML(conclusion)
   }
+})
+
+# Generate bar plot based on selected categorical variable
+output$barplot <- renderPlot({
+  # Ensure the selected column exists in the data
+  if (input$categorical %in% names(df)) {
+    # Dynamically access the selected column from the data
+    selected_data <- df[[input$categorical]]
+  # Dynamically access the selected column from the data
+  selected_data <- df[[input$categorical]]
+  
+  # Ensure the selected data is not empty
+  if (length(selected_data) > 0) {
+    # Create bar plot
+    ggplot(data.frame(selected_data), aes(x = selected_data, fill = selected_data)) +
+      geom_bar() +
+      xlab(input$categorical) +
+      ylab("Count") +
+      theme_minimal()+
+      scale_fill_brewer(palette = "Set3") +
+      labs(fill = "Legend")
+  } else {
+    showNotification("The selected variable contains no data.", type = "error")
+  }
+  }else {
+    showNotification("Selected variable not found in the dataset.", type = "error")
+  }
+})
+
+# Render the histogram plot
+output$histogram <- renderPlot({
+  
+  # Ensure that the selected input variable is numeric
+  req(input$numerical)
+  
+  # Check if the selected column is numeric
+  if (is.numeric(df[[input$numerical]])) {
+    
+    # Create the histogram using ggplot2
+    ggplot(df, aes(x = .data[[input$numerical]])) +
+      geom_histogram(binwidth = 5, fill = "grey", color = "black") +  # Define bin width and colors
+      xlab(input$numerical) +  # Label the x-axis dynamically based on selected variable
+      ylab("Frequency") +      # Label the y-axis
+      theme_minimal()          # Use a minimal theme for a clean look
+    
+  } else {
+    # If the variable is not numeric, display a notification
+    showNotification("Please select a numeric variable.", type = "error")
+  }
+})
+
+# Render the scatterplot with regression line and 95% confidence interval
+output$scatterplot <- renderPlot({
+  
+  # Ensure that both selected variables are numeric
+  req(input$numerical1, input$numerical2)
+  
+  # Check if selected variables are valid numeric columns
+  if (is.numeric(df[[input$numerical1]]) && is.numeric(df[[input$numerical2]])) {
+    
+    # Create scatterplot with regression line and confidence interval using ggplot2
+    ggplot(df, aes(x = .data[[input$numerical1]], y = .data[[input$numerical2]])) +
+      geom_point(color = "black", size = 3) +  # Scatter points with custom color and size
+      geom_smooth(method = "lm", se = TRUE, color = "red", fill = "lightblue", level = 0.95) +  # Add regression line and 95% CI
+      xlab(input$numerical1) +  # Dynamic X-axis label
+      ylab(input$numerical2) +  # Dynamic Y-axis label
+      theme_minimal() +    # Minimal theme for a clean look
+      ggtitle(paste("Scatterplot of", input$numerical1, "vs", input$numerical2))  # Dynamic title
+  } else {
+    # Show a notification if non-numeric columns are selected (though unlikely here)
+    showNotification("Please select numeric variables for both axes.", type = "error")
+  }
+})
+
+# Render the density plot
+output$densityPlot <- renderPlot({
+  
+  # Ensure that the selected input variable is numeric and exists in the data
+  req(input$numerical)
+  
+  # Check if the selected variable is numeric
+  if (is.numeric(df[[input$numerical]])) {
+    
+    # Get the colors from the "Set3" palette
+    set3_colors <- RColorBrewer::brewer.pal(12, "Set3")  # "Set3" palette has 12 colors
+    random_color <- sample(set3_colors, 1)  # Randomly pick one color from the "Set3" palette
+    
+    # Create the density plot using ggplot2
+    ggplot(df, aes(x = .data[[input$numerical]])) +
+      geom_density(fill = random_color, alpha = 0.4) +  # Density plot with fill and transparency
+      xlab(input$numerical) +  # Dynamic label for the x-axis
+      ylab("Density") +  # Label for the y-axis
+      ggtitle(paste("Density Plot of", input$numerical)) +  # Dynamic title based on the variable
+      theme_minimal()  # Use a minimal theme for a clean look
+    
+  } else {
+    # If the variable is not numeric, show a notification
+    showNotification("Please select a numeric variable.", type = "error")
+  }
+})
+
+# Render the interactive data table
+output$data_table <- renderDT({
+  datatable(df, options = list(pageLength = 10, searchHighlight = TRUE, search = list(regex = TRUE, smart = FALSE)), 
+            filter = 'top',  # Add filter options on top of each column
+            rownames = FALSE)
 })
 
 }

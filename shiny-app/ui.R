@@ -7,8 +7,10 @@ library(bslib)
 
 ui <- fluidPage(
   page_navbar(
+    id = "navbar",
     theme = bs_theme(version = 5, bootswatch = "sketchy"),
     title = "DATA2902: Shiny App",
+    selected = "Plotting",
     
     # First Tab Panel (Home)
     tabPanel(
@@ -48,6 +50,8 @@ ui <- fluidPage(
              icon = icon("balance-scale"),
              sidebarLayout(
                sidebarPanel(
+                 class = "border-primary mb-3",  # Bootstrap classes for text color, background color, and margin-bottom
+                 style = "max-width: 20rem;",
                  selectInput(
                    "select",
                    label = "Choose a test to perform",
@@ -56,8 +60,10 @@ ui <- fluidPage(
                      "Chi-Squared Goodness of Fit Test" = 2,
                      "Two-sample t-test" = 3
                    ),
-                   selected = 1
+                   selected = 1,
                  ),
+
+                 
                  # These UI elements will dynamically display when test 1 (Chi-Squared Test for Independence) is selected
                  conditionalPanel(
                    condition = "input.select == 1",
@@ -279,21 +285,89 @@ ui <- fluidPage(
              
     ),
     tabPanel(title = "Plotting",
-             icon = icon("chart-bar")),
-    tabPanel( title = "About",
-              icon = icon("info-circle"),
-              h4("About the Chi-Square Test"),
-              p("The Chi-Square test is used to determine if there is a significant difference between the observed and expected frequencies in one or more categories."),
-              p("It compares the observed frequencies from your data with the expected frequencies based on a specific hypothesis."),
-              h4("Formula"),
-              p("The formula for the Chi-Square statistic is:"),
-              tags$ul(
-                tags$li("X² = Σ((Observed - Expected)² / Expected)"),
-                tags$li("Degrees of freedom (df) = number of categories - 1")
-              ),
-              h4("How to Interpret"),
-              p("If the p-value is less than 0.05, we reject the null hypothesis, indicating that there is a statistically significant difference between the observed and expected data.")
-              )
+             width = 3,
+             icon = icon("chart-bar"),
+             sidebarLayout(
+               sidebarPanel(
+                 class = "text-white bg-secondary mb-3",  # Bootstrap classes for text color, background color, and margin-bottom
+                 style = "max-width: 20rem;",           # Inline style to limit the card's width
+                 tags$div("Editor", 
+                          style = "font-size: 30px; font-weight: bold;"), 
+                 selectInput(
+                   "plotting",
+                   label = "Choose a plot",
+                   choices = list(
+                     "Bar Plot" = 1,
+                     "Histogram" = 2,
+                     "Scatterplot" = 3,
+                     "Density Plot" = 4,
+                     "Box Plot" = 5
+                   ),
+                   selected = 1
+                 ),
+                 conditionalPanel(
+                   condition = "input.plotting == 1",
+                   uiOutput("var_select_cat")
+                 ),
+                 conditionalPanel(
+                   condition = "input.plotting == 2",
+                   uiOutput("var_select_num3")  
+                 ),
+                 conditionalPanel(
+                   condition = "input.plotting ==  3",
+                   uiOutput("var_select_num1"),
+                   uiOutput("var_select_num2")
+                 ),
+                 conditionalPanel(
+                   condition = "input.plotting == 4",
+                   uiOutput("var_select_num4")
+                 ),
+                 conditionalPanel(
+                   condition = "input.plotting == 5",
+                   uiOutput("var_select_num5"),
+                   uiOutput("var_select_cat2")
+                 )
+                 
+               ),
+               mainPanel(
+                 h2("Visualization output"),
+                 conditionalPanel(
+                   condition = "input.plotting == 1",
+                   plotOutput("barplot")
+                 ),
+                 conditionalPanel(
+                   condition = "input.plotting == 2",
+                   plotOutput("histogram")
+                 ),
+                 conditionalPanel(
+                   condition = "input.plotting == 3",
+                   conditionalPanel(
+                     condition = "input.numerical1 != input.numerical2",
+                     plotOutput("scatterplot")
+                   ),
+                   conditionalPanel(
+                     condition = "input.numerical1 == input.numerical2",
+                     p("Warning: Both selected variables are the same. Please select different variables.", style = "color: red; font-weight: bold;")
+                   )
+                 ),
+                 conditionalPanel(
+                   condition = "input.plotting == 4",
+                   plotOutput("densityPlot")
+                 ),
+                 conditionalPanel(
+                   condition = "input.plotting == 5",
+                   plotOutput("boxplot")
+                 )
+               )
+             )
+             
+             
+             ),
+    tabPanel(
+      title = "Data Table",
+      icon = icon("table"),
+      DTOutput("data_table")
+    )
   )
 )
 
