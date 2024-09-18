@@ -1,0 +1,360 @@
+---
+title: "Untitled"
+output: html_document
+date: "2024-09-11"
+---
+```{r}
+library(gendercoder)
+library(tidyverse)
+library(gendercoder)
+library(janitor)
+library(hms)
+library(patchwork)
+library(knitr)
+library(ggplot2)
+```
+
+
+
+```{r}
+df <- read.csv("my_data.csv")
+
+df
+```
+```{r}
+# Remove columns with more than 50% missing values
+missing_threshold <- 0.5 * nrow(df)
+df_cleaned <- df %>% select_if(~ sum(is.na(.)) < missing_threshold)
+
+#--------------------------------------------------------------------------------------------
+
+# Impute numeric columns with median
+numeric_columns <- c("age", "wam", "shoe_size")  # Add other numeric columns if needed
+df_cleaned[numeric_columns] <- lapply(df_cleaned[numeric_columns], function(x) {
+  ifelse(is.na(x), median(x, na.rm = TRUE), x)
+})
+
+#--------------------------------------------------------------------------------------------
+
+# Impute categorical columns with mode
+categorical_columns <- c("target_grade", "assignment_preference", "trimester_or_semester", 
+                         "tendency_yes_or_no", "pay_rent", "urinal_choice", "stall_choice") 
+
+# Function to replace NA with mode
+replace_with_mode <- function(x) {
+  mode_val <- names(which.max(table(x)))
+  x[is.na(x)] <- mode_val
+  return(x)
+}
+
+df_cleaned[categorical_columns] <- lapply(df_cleaned[categorical_columns], replace_with_mode)
+
+#--------------------------------------------------------------------------------------------
+
+# Filter out weekly study hours more than 120
+df_cleaned <- df_cleaned %>%
+  filter(weekly_study_hours <= 120 | is.na(weekly_study_hours))
+
+#--------------------------------------------------------------------------------------------
+
+# Function to clean and convert various sleep time formats to numeric hours
+convert_sleep_time <- function(x) {
+  x <- tolower(x)  # Convert to lowercase for uniformity
+  
+  # Remove extra spaces
+  x <- str_trim(x)
+  
+  # Handle various cases
+  case_when(
+    grepl("\\d+\\.?\\d*h", x) ~ as.numeric(str_extract(x, "\\d+\\.?\\d*")),  # Handle cases like "8.5h"
+    grepl("around \\d+:\\d{2} hours", x) ~ {  # Handle cases like "Around 8:30 hours"
+      time_parts <- as.numeric(unlist(str_split(str_extract(x, "\\d+:\\d{2}"), ":")))
+      time_parts[1] + time_parts[2] / 60
+    },
+    grepl("\\d+-\\d+ hours", x) ~ as.numeric(str_extract(x, "\\d+(?=-)")),  # Handle cases like "8-9 hours" (take upper value)
+    grepl("\\d+~\\d+ h", x) ~ as.numeric(str_extract(x, "\\d+(?=~)")),  # Handle cases like "7~8 h" (take upper value)
+    grepl("\\d+ hours \\d+ mins", x) ~ {  # Handle cases like "7 hours 15 mins"
+      hours <- as.numeric(str_extract(x, "\\d+(?= hours)"))
+      mins <- as.numeric(str_extract(x, "\\d+(?= mins)"))
+      hours + mins / 60
+    },
+    grepl("\\d+", x) ~ as.numeric(str_extract(x, "\\d+")),  # Handle cases like "7 hours" or just "7"
+    TRUE ~ NA_real_  # Set other cases to NA
+  )
+}
+# Converting sleep times
+df_cleaned <- df_cleaned %>%
+  mutate(average_daily_sleep = sapply(average_daily_sleep, convert_sleep_time))
+
+# Cleaning sleep values. Omit less than 4 hours and more than 24 hours a day
+df_cleaned <- subset(df_cleaned, average_daily_sleep >= 4 & average_daily_sleep <= 24)
+
+# Cleaning WAM values. Omit answers that has WAM less than 49.5 and not First Year
+df_cleaned <- df_cleaned[!(df_cleaned$wam < 49.5 & df_cleaned$university_year != "First Year"), ]
+
+#--------------------------------------------------------------------------------------------
+
+# Function to handle height in different formats
+convert_height <- function(height) {
+  
+  # Convert everything to lowercase for uniformity and remove extra spaces
+  height <- tolower(height)
+  height <- stringr::str_trim(height)
+  
+  # Remove spaces between digits and "cm" if they exist
+  height <- gsub("\\s*cm", "cm", height)
+  
+  # Handle cases where height is in feet and inches
+  if (grepl("foot|ft|'|\"", height)) {
+    feet <- as.numeric(stringr::str_extract(height, "\\d+(?=(ft|'| foot))"))  # Extract feet
+    inches <- as.numeric(stringr::str_extract(height, "\\d+(?=(in|\"| inch))"))  # Extract inches
+    inches[is.na(inches)] <- 0  # If no inches provided, assume 0
+    return((feet * 30.48) + (inches * 2.54))  # Convert to cm
+  }
+  
+  # Handle cases where height is in meters (e.g., "1.8m", "1.79 m")
+  if (grepl("m", height) & !grepl("cm", height)) {
+    meters <- as.numeric(stringr::str_extract(height, "\\d+\\.?\\d*"))
+    return(meters * 100)  # Convert meters to cm
+  }
+  
+  # Handle cases with "cm" (e.g., "183cm", "156 cm", "194.5cm")
+  if (grepl("cm", height)) {
+    cm_value <- as.numeric(stringr::str_extract(height, "\\d+\\.?\\d*"))
+    return(cm_value)  # Return cm value
+  }
+  
+  # Handle cases like "160+" by extracting the number
+  if (grepl("\\+", height)) {
+    return(as.numeric(stringr::str_extract(height, "\\d+")))
+  }
+  
+  return(as.numeric(height))  # If numeric, return as is
+}
+
+
+# -------------------------------------------------------------------------------------------
+
+# Apply the height conversion to the height column
+df_cleaned <- df_cleaned |> 
+  dplyr::mutate(
+    height = sapply(height, convert_height),
+    height = case_when(
+      # Convert meters to cm
+      height <= 2.5 ~ height * 100,
+      # Convert values outside of valid height range to NA
+      height <= 100 ~ NA_real_,
+      height >= 250 ~ NA_real_,
+      TRUE ~ height
+    )
+  )
+
+#--------------------------------------------------------------------------------------------
+
+df_cleaned = df_cleaned |> mutate(
+  gender = gendercoder::recode_gender(gender, dictionary = fewlevels_en)
+)
+
+#--------------------------------------------------------------------------------------------
+library(forcats)
+# Clean and standardize the 'social_media' column
+df_cleaned <- df_cleaned |> 
+  mutate(
+    social_media = tolower(social_media),  # Convert to lowercase
+    social_media = str_replace_all(social_media, '[[:punct:]]',' '),  # Remove punctuation
+    social_media = stringr::word(social_media),  # Extract the first word (for multi-platform entries)
+    
+    # Standardize common social media platforms
+    social_media = case_when(
+      str_starts(social_media, "insta") ~ "instagram",
+      str_starts(social_media, "ig") ~ "instagram",
+      str_starts(social_media, "tik") ~ "tiktok",
+      str_starts(social_media, "we") ~ "wechat",
+      str_starts(social_media, "twi") ~ "twitter",
+      str_starts(social_media, "x") ~ "twitter",
+      str_starts(social_media, "mess") ~ "facebook",
+      str_starts(social_media, "bil") ~ "bilibili",
+      str_starts(social_media, "youtube") ~ "youtube",
+      str_starts(social_media, "snap") ~ "snapchat",
+      str_starts(social_media, "red") ~ "reddit",
+      str_starts(social_media, "dis") ~ "discord",
+      str_starts(social_media, "strava") ~ "strava",
+      str_starts(social_media, "xiaohongshu") ~ "xiaohongshu",
+      str_starts(social_media, "little red") ~ "xiaohongshu",
+      str_starts(social_media, "weibo") ~ "weibo",
+      str_starts(social_media, "line") ~ "line",
+      str_starts(social_media, "qq") ~ "qq",
+      str_starts(social_media, "pinterest") ~ "pinterest",
+      str_starts(social_media, "steam") ~ "steam",
+      str_starts(social_media, "douyin") ~ "douyin",
+      str_starts(social_media, "miiverse") ~ "miiverse",
+      social_media %in% c("none", "don't use social media", "hmm... not sure", "n") ~ "none",
+      TRUE ~ social_media
+    ),
+    
+    # Convert to title case for uniformity
+    social_media = tools::toTitleCase(social_media),
+    
+    # Lump rare categories into "Other"
+    social_media = forcats::fct_lump_min(social_media, min = 10)
+  )
+
+#--------------------------------------------------------------------------------------------
+
+# Clean the gender column
+# Define a function to clean gender values
+clean_gender <- function(gender) {
+  if (is.na(gender) || !is.character(gender)) {
+    return(NA)
+  }
+  
+  gender <- tolower(trimws(gender))  # Convert to lowercase and remove leading/trailing spaces
+  
+  if (gender %in% c('male', 'm', 'man', 'boy', 'cis male', 'heterosexual male', 'cisgender')) {
+    return('Male')
+  } else if (gender %in% c('female', 'f', 'woman', 'girl', 'femal', 'biological female')) {
+    return('Female')
+  } else {
+    return('Other')
+  }
+}
+
+# Apply the cleaning function to the gender column
+df_cleaned <- df_cleaned %>%
+  mutate(gender = sapply(gender, clean_gender))
+
+# --------------------------------------------------------------------------------------------
+
+# Clean the sibling_count column
+# Function to clean sibling counts
+clean_sibling_count <- function(x) {
+  if (is.numeric(x)) {
+    return(x)
+  } else if (grepl("\\d+", x)) {
+    return(as.numeric(stringr::str_extract(x, "\\d+")))
+  } else {
+    return(NA_real_)
+  }
+}
+
+# Apply cleaning function to sibling_count column
+df_cleaned$sibling_count <- sapply(df_cleaned$sibling_count, clean_sibling_count)
+
+# --------------------------------------------------------------------------------------------
+
+clean_age <- function(age) {
+  if (is.numeric(age)) {
+    return(ifelse(age >= 0 & age <= 120, age, NA_real_))  # Valid age range 0-120
+  } else if (grepl("\\d+", age)) {
+    # Extract the first numeric part that appears
+    numeric_age <- as.numeric(stringr::str_extract(age, "\\d+"))
+    
+    # Handle specific cases like "19. turning 20 soon" and "20+ (20)"
+    if (grepl("\\((\\d+)\\)", age)) {  # Case for "20+ (20)"
+      numeric_age <- as.numeric(stringr::str_extract(age, "\\((\\d+)\\)"))
+    } else if (grepl("\\d+\\.\\s*turning\\s*\\d+", age, ignore.case = TRUE)) {  # Case for "19. turning 20 soon"
+      numeric_age <- as.numeric(stringr::str_extract(age, "turning\\s*\\d+"))
+      numeric_age <- as.numeric(stringr::str_extract(numeric_age, "\\d+"))
+    }
+
+    return(ifelse(numeric_age >= 0 & numeric_age <= 120, numeric_age, NA_real_))
+  }
+  
+  return(NA_real_)  # Set non-numeric or out-of-range values to NA
+}
+
+# Apply the function to the 'age' column
+df_cleaned <- df_cleaned |> 
+  dplyr::mutate(age = sapply(age, clean_age))
+
+# --------------------------------------------------------------------------------------------
+# Clean the trimester_or_semester column
+df_cleaned <- df_cleaned |> 
+  dplyr::mutate(
+    trimester_or_semester = dplyr::case_when(
+      tolower(trimester_or_semester) %in% c("trimester", "tri") ~ "Trimester",
+      tolower(trimester_or_semester) %in% c("semester", "sem") ~ "Semester",
+      TRUE ~ "Not sure"  # Set non-standard responses to "Not sure"
+    )
+  )
+
+# --------------------------------------------------------------------------------------------'
+
+# Clean the pay_rent column
+df_cleaned <- df_cleaned |> 
+  dplyr::mutate(
+    pay_rent = dplyr::case_when(
+      grepl("mortgage", tolower(pay_rent)) ~ "no",  # Mortgage does not count as rent
+      grepl("utilities", tolower(pay_rent)) ~ "yes",  # Paying utilities counts as yes
+      tolower(pay_rent) == "yes" ~ "yes",
+      tolower(pay_rent) == "no" ~ "no",
+      TRUE ~ NA_character_  # Set ambiguous or non-standard responses to NA
+    )
+  )
+
+# --------------------------------------------------------------------------------------------
+
+clean_trimester_semester <- function(value) {
+  value <- tolower(value)  # Convert to lowercase for consistency
+  
+  # Standardize values
+  if (value == "semester") {
+    return("semester")
+  } else if (value == "trimester") {
+    return("trimester")
+  } else {
+    return(NA_character_)  # Any other value becomes NA
+  }
+}
+
+# Apply the cleaning function to the 'trimester_or_semester' column
+df_cleaned <- df_cleaned |> 
+  dplyr::mutate(trimester_or_semester = sapply(trimester_or_semester, clean_trimester_semester))
+
+# --------------------------------------------------------------------------------------------
+
+df_filtered <- df_cleaned |> 
+  dplyr::filter(weetbix_count > 0 & weetbix_count < 30)
+
+# --------------------------------------------------------------------------------------------
+
+clean_allergy_count <- function(value) {
+  value <- tolower(as.character(value))  # Convert to lowercase for consistency
+  
+  # Handle common textual representations of 'None' or 'No' as zero
+  if (value %in% c("none", "no", "zero", "0")) {
+    return(0)
+  }
+  
+  # Handle cases like '1 (Hayfever)' or '0~1.5' by extracting the first numeric part
+  if (grepl("\\d+", value)) {
+    numeric_value <- as.numeric(stringr::str_extract(value, "\\d+\\.?\\d*"))
+    return(ifelse(numeric_value >= 0 & numeric_value <= 100, numeric_value, NA_real_))
+  }
+  
+  # For non-numeric values such as 'Dust, Pollen', return NA
+  return(NA_real_)
+}
+
+# Apply the cleaning function to the 'allergy_count' column
+df_cleaned <- df_cleaned |> 
+  dplyr::mutate(allergy_count = sapply(allergy_count, clean_allergy_count))
+
+# --------------------------------------------------------------------------------------------
+
+# Transform the 'favorite_letter' column to uppercase
+df_cleaned <- df_cleaned |> 
+  dplyr::mutate(favourite_letter = toupper(favourite_letter))
+
+# --------------------------------------------------------------------------------------------
+
+df_cleaned <- df_cleaned |> 
+  dplyr::mutate(drivers_license = ifelse(grepl("no", tolower(drivers_license)), "No", "Yes"))
+
+df_cleaned <- df_cleaned[, !names(df_cleaned) %in% c("timestamp", "tendency_yes_or_no", "favourite_anime", "fluent_languages", "readable_languages", "country_of_birth","shoe_size", "steak_preference", "computer_os","daily_short_video_time", "relationship_status","diet_style", "usual_bedtime", "commute, favourite_letter")]
+View()
+# View the cleaned dataset
+df_cleaned[] <- lapply(df_cleaned, function(x) if(is.character(x)) as.factor(x) else x)
+write.csv(df_cleaned, file = "df_cleaned.csv", row.names = FALSE)
+```
+

@@ -6,6 +6,14 @@ library(shinyWidgets)
 library(bslib)
 
 ui <- fluidPage(
+  # Custom CSS for the checkbox styling
+  tags$style(HTML("
+    .form-check-input:checked {
+      background-color: white;
+      border-color: white;
+      opacity: 1;
+    }
+  ")),
   page_navbar(
     id = "navbar",
     theme = bs_theme(version = 5, bootswatch = "sketchy"),
@@ -283,7 +291,8 @@ ui <- fluidPage(
              )
              
     ),
-    tabPanel(title = "Plotting",
+    tabPanel(
+      title = "Plotting",
              width = 3,
              icon = icon("chart-bar"),
              sidebarLayout(
