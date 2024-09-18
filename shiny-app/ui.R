@@ -10,7 +10,6 @@ ui <- fluidPage(
     id = "navbar",
     theme = bs_theme(version = 5, bootswatch = "sketchy"),
     title = "DATA2902: Shiny App",
-    selected = "Plotting",
     
     # First Tab Panel (Home)
     tabPanel(

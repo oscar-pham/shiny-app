@@ -767,5 +767,19 @@ output$data_table <- renderDT({
             rownames = FALSE)
 })
 
+# Render the comparative boxplot
+output$boxplot <- renderPlot({
+  req(input$categorical, input$numerical)  # Ensure inputs are selected
+  
+  # Create the boxplot using ggplot2
+  ggplot(df, aes_string(x = input$categorical, y = input$numerical, fill = input$categorical)) +
+    geom_boxplot() +
+    theme_minimal() +
+    labs(title = "Comparative Boxplot",
+         y = input$numerical,
+         fill = input$categorical)
+})
+
+
 }
 
