@@ -138,7 +138,14 @@ server <- function(input, output, session) {
   # UI elements for selecting variables
   output$var_select_cat <- renderUI({
     if (input$plotting == 1) {
-      selectInput("categorical", "Choose a categorical variable", choices = names(df)[sapply(df, is.factor)], selected = names(df)[1])
+      selectInput("categorical1", "Choose a categorical variable", choices = names(df)[sapply(df, is.factor)], selected = names(df)[1])
+    }
+  })
+  
+  # UI elements for selecting variables
+  output$var_select_acat <- renderUI({
+    if (input$plotting == 1) {
+      selectInput("categorical2", "Choose another categorical variable", choices = names(df)[sapply(df, is.factor)], selected = names(df)[1])
     }
   })
   
@@ -663,29 +670,18 @@ output$t_conclusion <- renderUI({
 
 # Generate bar plot based on selected categorical variable
 output$barplot <- renderPlot({
-  # Ensure the selected column exists in the data
-  if (input$categorical %in% names(df)) {
     # Dynamically access the selected column from the data
-    selected_data <- df[[input$categorical]]
-  # Dynamically access the selected column from the data
-  selected_data <- df[[input$categorical]]
-  
-  # Ensure the selected data is not empty
-  if (length(selected_data) > 0) {
+    selected_data <- df[[input$categorical1]]
     # Create bar plot
     ggplot(data.frame(selected_data), aes(x = selected_data, fill = selected_data)) +
       geom_bar() +
-      xlab(input$categorical) +
+      xlab(input$categorical1) +
       ylab("Count") +
       theme_minimal()+
       scale_fill_brewer(palette = "Set3") +
       labs(fill = "Legend")
-  } else {
-    showNotification("The selected variable contains no data.", type = "error")
-  }
-  }else {
-    showNotification("Selected variable not found in the dataset.", type = "error")
-  }
+
+
 })
 
 # Render the histogram plot
@@ -780,6 +776,41 @@ output$boxplot <- renderPlot({
          fill = input$categorical)
 })
 
+output$stacked_barplot <- renderPlot({
+    # Dynamically access the selected columns from the data
+    selected_data1 <- df[[input$categorical1]]
+    selected_data2 <- df[[input$categorical2]]
+    
+      # Create a stacked bar plot
+      ggplot(df, aes(x = selected_data1, fill = selected_data2)) +
+        geom_bar(position = "stack") +
+        xlab(input$categorical1) +
+        ylab("Count") +
+        theme_minimal() +
+        scale_fill_brewer(palette = "Set3") +
+        labs(fill = input$categorical2)  # Set label for the fill legend
+})
+
+# Render the mosaic plot based on Chi-Square test results
+output$mosaicPlot <- renderPlot({
+  results <- test_results()
+  
+  if (!is.null(results)) {
+    observed_table <- results$observed_table
+    vcd::mosaic(
+      observed_table,
+      shade = TRUE,
+      legend = TRUE,
+      labeling_args = list(
+        set_varnames = c(input$var1, input$var2)
+      ),
+      main = "Mosaic Plot of Observed Frequencies"
+    )
+  } else {
+    plot.new()
+    text(0.5, 0.5, "Invalid or insufficient data for Mosaic Plot", cex = 1.5)
+  }
+})
 
 }
 

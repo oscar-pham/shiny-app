@@ -297,7 +297,6 @@ ui <- fluidPage(
              icon = icon("chart-bar"),
              sidebarLayout(
                sidebarPanel(
-                 class = "text-white bg-secondary mb-3",  # Bootstrap classes for text color, background color, and margin-bottom
                  style = "max-width: 20rem;",           # Inline style to limit the card's width
                  tags$div("Editor", 
                           style = "font-size: 30px; font-weight: bold;"), 
@@ -315,7 +314,12 @@ ui <- fluidPage(
                  ),
                  conditionalPanel(
                    condition = "input.plotting == 1",
-                   uiOutput("var_select_cat")
+                   checkboxInput(inputId = "stacked", label = "Stacked?", value = FALSE),
+                   uiOutput("var_select_cat"),
+                   conditionalPanel(
+                     condition = "input.stacked == true",
+                     uiOutput("var_select_acat")
+                   )
                  ),
                  conditionalPanel(
                    condition = "input.plotting == 2",
@@ -341,7 +345,15 @@ ui <- fluidPage(
                  h2("Visualization output"),
                  conditionalPanel(
                    condition = "input.plotting == 1",
-                   plotOutput("barplot")
+                   conditionalPanel(
+                     condition = 'input.stacked == false',
+                     plotOutput("barplot")
+                   ),
+                   conditionalPanel(
+                     condition = 'input.stacked == true',
+                     plotOutput("stacked_barplot")
+                   )
+                   
                  ),
                  conditionalPanel(
                    condition = "input.plotting == 2",
